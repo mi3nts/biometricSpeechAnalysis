@@ -1,1 +1,1 @@
-# biometricSpeechAnalysis
+# MINTS Biometric Speech Analysis Project
