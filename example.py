@@ -94,10 +94,7 @@ app.layout = html.Div(children=[
         id='table',
         columns=[{"name": i, "id": i} for i in df.columns],
         data=df.to_dict('records')
-    ),
-    
-    dcc.Location(id='url', refresh=False),
-    html.Div(id='page-content')
+    )
 ])
 
 if __name__ == '__main__':
