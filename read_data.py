@@ -1,6 +1,6 @@
 # CODE TO READ EEG FILE COLLECTED WITH THE COGNIONICS MOBILE-128 SYSTEM USING MNE AND READ TRANSCRIPT FROM YOUTUBE VIDEO
 
-# CODE AUTHORED BY: ARJUN SRIDHAR
+# CODE AUTHORED BY: SHAWHIN TALEBI AND ARJUN SRIDHAR
 # PROJECT: biometricSpeechAnalysis
 # GitHub: https://github.com/mi3nts/biometricSpeechAnalysis
 # ==============================================================================
