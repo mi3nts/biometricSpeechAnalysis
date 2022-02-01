@@ -1,5 +1,4 @@
 # CODE TO PLOT EXAMPLE DISPLAY USING PLOTLY DASH
-
 # CODE AUTHORED BY: ARJUN SRIDHAR
 # PROJECT: biometricSpeechAnalysis
 # GitHub: https://github.com/mi3nts/biometricSpeechAnalysis
