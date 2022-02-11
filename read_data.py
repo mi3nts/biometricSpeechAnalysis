@@ -1,6 +1,6 @@
 # CODE TO READ EEG FILE COLLECTED WITH THE COGNIONICS MOBILE-128 SYSTEM USING MNE AND READ TRANSCRIPT FROM YOUTUBE VIDEO
 
-# CODE AUTHORED BY: SHAWHIN TALEBI AND ARJUN SRIDHAR
+# CODE AUTHORED BY: ARJUN SRIDHAR
 # PROJECT: biometricSpeechAnalysis
 # GitHub: https://github.com/mi3nts/biometricSpeechAnalysis
 # ==============================================================================
@@ -44,7 +44,8 @@ def read_eeg(vhdr_fname):
 
     # create pandas dataframe with eeg data
     df_eeg_data = pd.DataFrame(raw.get_data().transpose(), columns=raw.ch_names)
-    
+    # don't include T7 electrode
+    df_eeg_data = df_eeg_data.loc[:, ~df_eeg_data.columns.isin(['T7'])]
     # create time index - round to integer to match with transcript data
     times = list(range(len(df_eeg_data.index)))
     times = [int(t / 500) for t in times]
