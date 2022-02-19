@@ -1,6 +1,6 @@
 # CODE TO READ EEG FILE COLLECTED WITH THE COGNIONICS MOBILE-128 SYSTEM USING MNE AND READ TRANSCRIPT FROM YOUTUBE VIDEO
 
-# CODE AUTHORED BY: ARJUN SRIDHAR
+# CODE AUTHORED BY: SHAWHIN TALEBI AND ARJUN SRIDHAR
 # PROJECT: biometricSpeechAnalysis
 # GitHub: https://github.com/mi3nts/biometricSpeechAnalysis
 # ==============================================================================
@@ -10,14 +10,18 @@ import mne
 import pandas as pd
 import datetime
 import time
+import matplotlib.pyplot as plt
+import numpy as np
 
 # INPUTS
 #   - vhdr_fname = string. path to relevant .vhdr file
 #   ~ example: vhdr_fname = "./data/2020_06_04_T05_U00T_EEG01.vhdr"
 
 # OUTPUTS
-#   - eeg_data = pandas dataframe with columns as biometric variables and rows as
+#   - df_eeg_data = pandas dataframe with columns as biometric variables and rows as
 #   timesteps
+#   - df_eeg_data_youtube = pandas dataframe with columns as biometric variables and rows as
+#   timesteps for when the youtube video was playing
 
 # DEPENDENCIES
 #   - none
@@ -44,18 +48,37 @@ def read_eeg(vhdr_fname):
 
     # create pandas dataframe with eeg data
     df_eeg_data = pd.DataFrame(raw.get_data().transpose(), columns=raw.ch_names)
-    # don't include T7 electrode
-    df_eeg_data = df_eeg_data.loc[:, ~df_eeg_data.columns.isin(['T7'])]
+    
+    # Trigger to sync with tobii eye data
+    trig_tob = df_eeg_data.loc[df_eeg_data['TRIGGER'] == 3]
+    start_tob = trig_tob.index[0]
+    df_eeg_data = df_eeg_data.iloc[start_tob:, :]
+    df_eeg_data.reset_index(inplace=True)
+    
     # create time index - round to integer to match with transcript data
     times = list(range(len(df_eeg_data.index)))
     times = [int(t / 500) for t in times]
-    
-    # take average for a given time
     df_eeg_data['Time'] = times
-    df_eeg_data_avg = df_eeg_data.groupby('Time').mean()
-    df_eeg_data_avg.reset_index(inplace=True)
     
-    return df_eeg_data_avg
+    # trigger for data during youtube video
+    temp =  df_eeg_data.loc[df_eeg_data['TRIGGER'] == 8888]
+    youtube_start = df_eeg_data.loc[df_eeg_data['TRIGGER'] == 8888].index[0]
+    youtube_end = temp.index[len(temp.index) - 1]
+    df_eeg_data_youtube = df_eeg_data.iloc[youtube_start:youtube_end + 1, :]
+    print(df_eeg_data_youtube)
+    
+    df_eeg_data = df_eeg_data.loc[:, ~df_eeg_data.columns.isin(['T7', 'TRIGGER', 'ACC79', 'Packet Counter',
+                                                              'ACC77', 'ACC78', 'AUX 2', 'AUX 1', 'index'])]
+    
+    df_eeg_data_youtube = df_eeg_data_youtube.loc[:, ~df_eeg_data_youtube.columns.isin(['T7', 'TRIGGER', 'ACC79', 
+                                                                                        'Packet Counter', 'ACC77', 
+                                                                                        'ACC78', 'AUX 2', 'AUX 1', 'index'])]
+    
+    # sync up time with youtube video
+    df_eeg_data_youtube['Time'] = df_eeg_data_youtube['Time'] - df_eeg_data_youtube.iloc[0]['Time'] + 1
+    df_eeg_data_youtube['Time'] = df_eeg_data_youtube['Time'].astype(int)
+    
+    return df_eeg_data, df_eeg_data_youtube
 
 # INPUTS
 #   - text file name = string. path to relevant youtube transcription video
@@ -85,11 +108,12 @@ def read_transcript_data(txt_file):
         
         time_text['Time'].append(int(sec))
         time_text['words'].append(text.strip())
-        df_text = pd.DataFrame.from_dict(time_text)
+    
+    df_text = pd.DataFrame.from_dict(time_text)
     
     return df_text
 
-df_eeg_data = read_eeg('./nlp_data/2022_01_14_T04_U002_EEG01/2022_01_14_T04_U002_EEG01.vhdr')
+df_eeg_data, df_eeg_data_youtube = read_eeg('./nlp_data/2022_01_14_T04_U002_EEG01/2022_01_14_T04_U002_EEG01.vhdr')
 df_text = read_transcript_data('./nlp_data/daredevil_time.txt')
-print(df_eeg_data)
+print(df_eeg_data_youtube)
 print(df_text)
