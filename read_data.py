@@ -246,12 +246,12 @@ def read_all_data_youtube(eeg_file, participant_file, livedata_file, transcript_
     
     return df_eeg_data, df_tobii, df_eeg_data_youtube, df_tobii_youtube, df_text
     
+if __name__ == '__main__':
+    data = read_all_data_youtube('./nlp_data/2022_01_14_T04_U002_EEG01/2022_01_14_T04_U002_EEG01.vhdr', 
+            './nlp_data/2022_01_14_T04_U002_Tobii01/segments/1/segment.json', 
+            './nlp_data/2022_01_14_T04_U002_Tobii01/segments/1/livedata.json.gz',
+            './nlp_data/daredevil_time.txt')
 
-data = read_all_data_youtube('./nlp_data/2022_01_14_T04_U002_EEG01/2022_01_14_T04_U002_EEG01.vhdr', 
-          './nlp_data/2022_01_14_T04_U002_Tobii01/segments/1/segment.json', 
-          './nlp_data/2022_01_14_T04_U002_Tobii01/segments/1/livedata.json.gz',
-          './nlp_data/daredevil_time.txt')
-
-df_eeg_data, df_tobii, df_eeg_data_youtube, df_tobii_youtube, df_text = data[0], data[1], data[2], data[3], data[4]
-print(df_tobii_youtube)
-print(df_eeg_data_youtube)
+    df_eeg_data, df_tobii, df_eeg_data_youtube, df_tobii_youtube, df_text = data[0], data[1], data[2], data[3], data[4]
+    print(df_tobii_youtube)
+    print(df_eeg_data_youtube)
