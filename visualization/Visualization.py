@@ -9,12 +9,15 @@ Original file is located at
 
 # Prepare environment
 import os
+import subprocess
+import re
 
-if not os.path.isfile("_installed"):
+'''
   !pip install spacy dash jupyter-dash pandas==1.2.0 mne[data] gdown yt-dlp webvtt-py librosa > /dev/null
   !python -m spacy download en_core_web_sm
   !apt install p7zip -y > /dev/null
   !echo installed >> _installed
+'''
 
 # Common imports
 import sys, os, time
@@ -24,15 +27,14 @@ import pandas as pd
 import spacy as sp
 import numpy as np
 import mne
-import dash
-from dash import html, dcc
-from jupyter_dash import JupyterDash
 import numpy as np # We might need it.
-from dash import dash_table
 
 # NLTK
 import nltk
 import threading
+
+# Caption processing
+import webvtt
 
 # We can just download this asynchronously
 nltk.download('vader_lexicon')
@@ -45,6 +47,8 @@ from nltk import word_tokenize, pos_tag
 
 # Matplotlib (alternative to dash for simple debugging graphs)
 import matplotlib.pyplot as plt
+# Enable interactive mode
+plt.ion()
 
 # Download and decrypt MINTS data. I think I put the 3 in the wrong place in the
 # password. Oh well.
@@ -52,16 +56,44 @@ import matplotlib.pyplot as plt
 # the week, so I'm temporarily hosting it on a temporary web server. I'm sorry
 # in advance for my terrible upload bandwidth.
 
-zip_password = "LetsDoTheMINT3SWarpAgain!"
-zipfile_name = "MINTS.zip"
-to_download = "MINTS.zip" # Replace with LargeMINTS.zip for the large dataset
-if not os.path.exists(zipfile_name):
-  !curl https://roadblocktoawesome.com/$to_download --insecure > MINTS.zip
-!mkdir -p nlp_data && cd nlp_data && 7z -y x /content/$zipfile_name -p$zip_password
+# Import dash selectively
+from dash import dash_table
+import dash
+from dash import html, dcc
 
-# Download biometric modules
-!git clone https://github.com/mi3nts/biometricSpeechAnalysis.git
-sys.path.append(os.path.abspath("biometricSpeechAnalysis"))
+try:
+    # Test if we're in a a Colab environment
+    import google.colab 
+    from jupyter_dash import JupyterDash
+    class Dash(JupyterDash):
+        def run_server(self, *args, **kwargs):
+            return JupyterDash.run_server(self, *args, mode="inline", debug=True, **kwargs)
+except ImportError:
+    from dash import Dash
+
+import requests
+from zipfile import ZipFile
+import os
+from io import BytesIO
+
+zip_password = "LetsDoTheMINT3SWarpAgain!"
+to_download = "MINTS.zip" # Replace with LargeMINTS.zip for the large dataset
+
+if not os.path.exists("./nlp_data/2022_01_14_T04_U002_EEG01/2022_01_14_T04_U002_EEG01.vhdr"):
+    res = requests.get(f"https://personal.utdallas.edu/~atm170000/{to_download}")
+
+    os.makedirs("nlp_data", exist_ok=True)
+    f = open("./nlp_data/_temp.zip", "wb")
+    f.write(res.content)
+    f.close()
+
+    print("Attempting to call 7zip")
+    subprocess.check_call(["7z", "-y", "x", "-p" + zip_password, "_temp.zip"], cwd="./nlp_data")
+
+    os.remove("nlp_data/_temp.zip")
+
+# We assume the biometric model is one directory up
+sys.path.append(os.path.split(os.path.abspath("."))[0])
 
 # Import them
 # from read_data import *
@@ -117,13 +149,13 @@ def read_eeg(vhdr_fname):
 df_eeg_data = read_eeg("./nlp_data/2022_01_14_T04_U002_EEG01/2022_01_14_T04_U002_EEG01.vhdr")
 
 yt_wav = "BadTalk.wav"
-
-!yt-dlp -x --audio-format wav --audio-quality 0 --write-auto-sub -o $yt_wav https://www.youtube.com/watch?v=nGS8_R79vls
+if not os.path.exists("nlp_data/BadTalk.wav.en.vtt"):
+    print("Attempting to call Youtube-DL Plus (yt-dlp)")
+    subprocess.check_call(f"yt-dlp -x --audio-format wav --audio-quality 0 --write-auto-sub -o {yt_wav} https://www.youtube.com/watch?v=nGS8_R79vls", cwd="./nlp_data")
 
 samplerate = 500
 
-import webvtt
-vtt = webvtt.read(yt_wav + ".en.vtt")
+vtt = webvtt.read("nlp_data/" + yt_wav + ".en.vtt")
 
 def ts_to_frameno(ts):
   # Converts a 00:00:00.000 timestamp into a frame number
@@ -132,7 +164,6 @@ def ts_to_frameno(ts):
   frameno = int(total * samplerate)
   return frameno
 
-import re
 cap_re = re.compile(r"<(?P<time>\d{2}:\d{2}:\d+\.\d+)><c>(?P<text>[^<]+)</c>")
 
 # Clearly, not the most efficient way of doing it, but it works
@@ -140,7 +171,7 @@ frame_to_caption = [0] * len(df_eeg_data)
 caption_text = ['']
 
 for caption in vtt:
-  print(caption)
+  # print(caption)
   frame_start = ts_to_frameno(caption.start)
   frame_end = ts_to_frameno(caption.end)
   words = []
@@ -167,13 +198,9 @@ for caption in vtt:
       frame_to_caption[i] = len(caption_text) if (frame_to_caption[i] == 0 or not bad_guess) else frame_to_caption[i]
     caption_text.append(word_text)
 
-print(sum(frame_to_caption))
+#print(sum(frame_to_caption))
 df_eeg_data["Caption"] = frame_to_caption
 del frame_to_caption
-
-#if "Time" in df_eeg_data.keys(): del df_eeg_data["Time"]
-
-df_eeg_data
 
 fftsize = 512
 sampleduration = 1 / samplerate * fftsize
@@ -263,16 +290,16 @@ def show_fft_data(frame_fft, frame_phase, signal=None, show=True, _start=0):
     ###!!!! WARNING! The JupyterDash class is apparently very inefficient the first time it runs.
     ###!!!!          It may take up to ten seconds to load, during which the output will initially
     ###!!!!          appear to be blank. DO NOT FEAR! It will eventually be populated.
-    app.run_server(mode="inline", debug=True)
+    app.run_server()
   
   return graphs
 
 should_show_test_data = False #@param {"type": "boolean"}
-print(df_eeg_data.keys())
+#print(df_eeg_data.keys())
 if should_show_test_data: show_fft_data(df_eeg_data["FT7fft"][0], df_eeg_data["FT7phase"][0], df_eeg_data["Time"])
 
-plt.plot(df_eeg_data[:500]["Time"], df_eeg_data[:500]["FT7"])
-plt.show()
+# plt.plot(df_eeg_data[:500]["Time"], df_eeg_data[:500]["FT7"])
+# plt.show()
 
 # Normalization, correlation data used for EDA + Data Preprocessing
 norm_df_eeg_data = (df_eeg_data - df_eeg_data.mean()) / df_eeg_data.std()
@@ -287,7 +314,7 @@ from sklearn.preprocessing import MinMaxScaler
 
 n = 2
 pca = PCA(n_components=n)
-print(norm_df_eeg_data.columns[norm_df_eeg_data.isna().any()].tolist())
+#print(norm_df_eeg_data.columns[norm_df_eeg_data.isna().any()].tolist())
 filtered_eeg_data = norm_df_eeg_data.drop(['FT7fft', 'FT7phase'], axis=1)
 pc = pca.fit_transform(filtered_eeg_data)
 pc_df = pd.DataFrame(data=pc, columns=[f'PC{i}' for i in range(n)])
@@ -304,70 +331,12 @@ TODO:
 
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
-df_eeg_data["Caption"]
-
 #import plotly.express as px
 #px.data.tips()
 
 from dash import Input, Output
 import plotly.express as px
 import math
-
-'''# Create app
-app = JupyterDash("EDA")
-
-# Realtime bug workaround from 11 hours ago, hot off the presses
-# https://github.com/plotly/dash/issues/1907#issuecomment-1035931483
-del app.config._read_only["requests_pathname_prefix"]
-
-@app.callback(
-    Output(component_id='eda_corr', component_property='figure'),
-    Input(component_id='eda_feats', component_property='value')
-)
-def update_corr_fig(input_value):
-    cols_idx = [corr_matrix.columns.get_loc(c) for c in input_value]
-    filtered_corr_mat = corr_matrix[input_value].iloc[cols_idx]
-    corr_fig = px.imshow(filtered_corr_mat, color_continuous_scale='RdBu_r')
-    corr_fig.update_layout(transition_duration=500)
-    return corr_fig
-pca_fig = px.scatter(pc_df, x='PC0', y='PC1')
-
-
-@app.callback(
-    Output(component_id='live-update', component_property='children'),
-    Input(component_id='interval1', component_property='n_intervals')
-)
-def _blah(n):
-  # Callback hook
-  return update_metrics(n)
-
-app.layout = html.Div(children=[
-    html.H1(children='MINTS Biometric Analysis'),
-    html.Div(children=[
-        html.H2(children='Exploratory Data Analysis'),
-        html.Div(children=[
-            html.H3(children='Correlations'),
-            html.Div(children=[
-                html.Div(children=[
-                    html.H4(children='Data Features'),
-                    dcc.Dropdown(id='eda_feats', options=corr_matrix.columns, value=corr_matrix.columns, multi=True),
-                ], style={'display': 'inline-block', 'width': '50%', 'vertical-align': 'top'}),
-                html.Div(children=[
-                    dcc.Graph(id='eda_corr')  
-                ], style={'display': 'inline-block', 'width': '50%', 'vertical-align': 'top'})
-            ])
-        ], style={'display': 'inline-block', 'width': '50%', 'vertical-align': 'top'}),
-        html.Div(children=[
-            html.H4(children='Principle Component Analysis'),
-            dcc.Graph(id='eda_pca', figure=pca_fig)
-        ], style={'display': 'inline-block', 'width': '50%', 'vertical-align': 'top'})
-    ]),
-    html.H1(children="Live Project Metrics"),
-    html.Div(id='live-update'),
-    dcc.Interval(id='interval1', interval=500, n_intervals=0)
-])
-
-#app.run_server(mode='inline', debug=True, host='localhost', port=1051)'''
 
 srate = 512
 
@@ -434,15 +403,14 @@ Usaid's just-added stuff
 df_eeg_data = normalized (norm_df_eeg_data)
 df_raw_data = df_eeg_data (no normalization)
 """
-from jupyter_dash import JupyterDash
-from dash import Dash, html, dcc, Input, Output, State
+from dash import html, dcc, Input, Output, State
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 
 external_sheets = ["https://fonts.googleapis.com/icon?family=Material+Icons"]
 
-app = JupyterDash(__name__, external_stylesheets=external_sheets)
+app = Dash(__name__, external_stylesheets=external_sheets)
 
 @app.callback(
     Output(component_id='eda_corr', component_property='figure'),
@@ -671,7 +639,7 @@ app.layout = html.Div(children=[
     dcc.Interval(id='play_interval', interval=1000, n_intervals=0)
 ])
 
-app.run_server(mode="inline", debug=True, port=1051)
+app.run_server() #mode="inline", debug=True, port=1051
 
 import tensorflow as tf
 
@@ -767,7 +735,7 @@ model.compile(loss=tf.keras.losses.BinaryCrossentropy(from_logits=True), optimiz
 
 history = model.fit(dataset, epochs=5, steps_per_epoch=len(df_eeg_data), validation_data=dataset_test)
 
-!while 1 do; sleep 1; nvidia-smi; done;
+#!while 1 do; sleep 1; nvidia-smi; done;
 
 ## PROBLEM! The data is very uneven (i.e., the "you"s are quite sparse)
 ## TODO: Ask Usaid + others about evening out the "you"s vs the not "you"s so
@@ -780,8 +748,8 @@ items[-1][-1]
 
 # Usaid: Exploratory Data Analysis Stuff I'm trying out
 import sys
-!{sys.executable} -m pip install -U pandas-profiling[notebook]
-!jupyter nbextension enable --py widgetsnbextension
+#!{sys.executable} -m pip install -U pandas-profiling[notebook]
+#!jupyter nbextension enable --py widgetsnbextension
 
 pd.__version__
 
