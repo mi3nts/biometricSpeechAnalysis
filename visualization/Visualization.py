@@ -33,7 +33,6 @@ import sys, os, time
 # Module imports
 import pandas as pd
 import spacy as sp
-import numpy as np
 import mne
 import numpy as np # We might need it.
 
@@ -602,34 +601,34 @@ def proc(n_clicks):
 pca_fig = px.scatter(pc_df, x='PC0', y='PC1', title='PCA Scatterplot')
 
 yt_script = """
-(() => {
+((style) => {
     window.videos = window.videos || {};
-    const video = "[vidid]";
-    
-    function onReady(event) {
-        console.log("Player ready");
-    }
+    const videos = [vidids];
     
     function onStateChange(event) {
         
     }
     
-    function window.onYouTubeIframeAPIReady() {
-        let player = YT.Player(video, {
-            width:  "260",
-            height: "960",
-            videoId: "2HBYjxtLcHY",
-            playerVars: {
-                playsInline: 1
-            },
-            events: {
-                onReady: onReady,
-                onStateChange: onStateChange
-            }
-        });
-        console.log("API loaded");
-        
-        window.videos[video] = player;
+    window.onYouTubeIframeAPIReady = function() {
+        Object.keys(videos).forEach(video) {
+            videoData = videos[video];
+            let player = new YT.Player(video, {
+                width:  "260",
+                height: "960",
+                videoId: "",
+                playerVars: {
+                    playsinline: 1
+                },
+                events: {
+                    onReady: (event) {
+                        console.log("Player ready");
+                    },
+                    onStateChange: onStateChange
+                }
+            });
+            
+            window.videos[video] = player;
+        }
     };
     
     if(!window.ytLoaded) {
@@ -637,15 +636,38 @@ yt_script = """
         
         var tag = document.createElement("script");
         tag.src = "https://www.youtube.com/iframe_api";
-        var firstScript = document.getElementsByName("script")[0];
+        var firstScript = document.getElementsByTagName("script")[0];
+        console.log(firstScript);
         firstScript.parentNode.insertBefore(tag, firstScript);
     }
     
     console.log("Script inserted");
-})();
+    return style;
+})
 """
 
+videoValues = {
+    'eyestream_video': {
+        'id': '2HBYjxtLcHY',
+        'width': '0',
+        'height': '0'
+    },
+    
+    'main_video': {
+        'id': 'HbVf7pmogVI',
+        'width': '0',
+        'height': '0'
+    }
+}
+
+app.clientside_callback(
+    yt_script.replace("[vidids]", ),
+    Output("hidden-div", "style"),
+    Input("hidden-div", "style")
+)
+
 app.layout = html.Div(children=[
+    html.P(id="hidden-div", style={"display": "none"}, title="none"),
     html.H1(children='MINTS Biometric Analysis'),
     html.Div(children=[
         html.H2(children='Exploratory Data Analysis'),
@@ -666,8 +688,7 @@ app.layout = html.Div(children=[
         html.Div(children=[
             html.Div(children=[
                 html.H3(children="Eyestream"),
-                html.Div(id="eyestream_vid"),
-                html.Script(children=yt_script.replace("[vidid]", "eyestream_vid"), type="text/javascript")
+                html.Div(id="eyestream_vid")
             ]),
         ], style={"display": "flex"}),
         html.H2(children='Per-timestep Analysis'),
@@ -697,6 +718,7 @@ app.layout = html.Div(children=[
 
 app.run_server() #mode="inline", debug=True, port=1051
 
+exit()
 import tensorflow as tf
 
 from tqdm import tqdm
