@@ -660,12 +660,12 @@ app.layout = html.Div(children=[
     html.Div(children=[
         html.Center(children=[html.H2(children='Models')]),
         html.Div(children=[
-            html.H2(children="Sentiment Analysis"),
+            html.H2(children="Sentiment Analysis", style={"margin": "5px"}),
             dcc.Graph(id='video_sentiment', figure=forest_figure, config={"editable": False, "staticPlot": True})
         ], style={"border": "1px solid gray", "margin": "5px"}),
         html.Div(children=[
-            html.H2(children="EEG-Assisted Speech Recognition"),
-            html.H1(children="?")
+            html.H2(children="EEG-Assisted Speech Recognition", style={"margin": "5px"}),
+            html.H4(children="(Model architecture and results here)")
         ], style={"border": "1px solid gray", "margin": "5px"})
     ], style={"border": "1px solid black", "margin": "5px"})
 ])
