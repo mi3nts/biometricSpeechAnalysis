@@ -346,6 +346,9 @@ forest_figure = go.Figure(layout={"title": "Random Forest Predictors"})
 forest_figure.add_trace(go.Scatter(x=range_in_seconds, y=forest_predictions, name="Random Forest Toxicity"))
 forest_figure.add_trace(go.Scatter(x=range_in_seconds, y=vader_predictions, name="VADER Toxicity"))
 
+forest_figure.update_xaxes(title="Time (Seconds)")
+forest_figure.update_yaxes(title="Toxicity")
+
 @app.callback(
     Output('time_series', 'figure'),
     Input('viz_feats', 'value')
