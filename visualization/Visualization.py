@@ -13,6 +13,8 @@ import subprocess
 import re
 
 # Kept so you know what to install
+import scipy.interpolate
+
 '''
   !pip install spacy dash jupyter-dash pandas==1.2.0 mne[data] gdown yt-dlp webvtt-py librosa > /dev/null
   !python -m spacy download en_core_web_sm
@@ -34,6 +36,10 @@ import threading
 
 # Caption processing
 import webvtt
+
+# Wave processing
+import wave
+import struct
 
 # We can just download this asynchronously
 nltk.download('vader_lexicon')
@@ -150,7 +156,7 @@ def read_eeg(vhdr_fname):
     
     # trigger for data during youtube video
     temp =  df_eeg_data.loc[df_eeg_data['TRIGGER'] == 8888]
-    #youtube_start = df_eeg_data.loc[df_eeg_data['TRIGGER'] == 8888].index[0]
+    youtube_start = df_eeg_data.loc[df_eeg_data['TRIGGER'] == 8888].index[0]
     youtube_end = temp.index[len(temp.index) - 1]
     df_eeg_data = df_eeg_data.iloc[:youtube_end + 1, :]
     #print(df_eeg_data_youtube)
@@ -162,9 +168,9 @@ def read_eeg(vhdr_fname):
     #df_eeg_data_youtube['Time'] = df_eeg_data_youtube['Time'] - df_eeg_data_youtube.iloc[0]['Time'] + 1
     #df_eeg_data_youtube['Time'] = df_eeg_data_youtube['Time'].astype(int)
     
-    return df_eeg_data
+    return df_eeg_data, youtube_start, youtube_end
 
-df_eeg_data = read_eeg(os.path.join(nlp_data, "2022_01_14_T04_U002_EEG01/2022_01_14_T04_U002_EEG01.vhdr"))
+df_eeg_data, youtube_start, youtube_end = read_eeg(os.path.join(nlp_data, "2022_01_14_T04_U002_EEG01/2022_01_14_T04_U002_EEG01.vhdr"))
 
 yt_wav = "BadTalk.wav"
 if not os.path.exists(os.path.join(nlp_data, "BadTalk.wav.en.vtt")):
@@ -342,9 +348,43 @@ else:
 
 vader_predictions *= 100.0 # Scale properly
 
+with wave.open(os.path.join(nlp_data, "BadTalk.wav"), "rb") as wav:
+    frames = []
+    nframes = wav.getnframes()
+    channels = wav.getnchannels()
+    width = wav.getsampwidth()
+    format = channels * ({1: "B", 2: "H", 4: "I"})[width]
+    _channel_samp_width = channels * width
+    
+    all_frames = wav.readframes(nframes)
+    print("Loading WAV file")
+    for frame in tqdm(struct.iter_unpack(format, all_frames), total=nframes):
+        frames.append(frame)
+    frames = np.mean(frames, axis=-1)
+    # Resample
+    resampler = scipy.interpolate.interp1d(np.linspace(0, 1, len(frames)), frames, "linear")
+    frames = resampler(np.linspace(0, 1, int(np.ceil(samplerate / wav.getframerate() * nframes))))
+
+average_volume_range = 1 * samplerate
+average_volume = frames / np.max(frames) * 100.0 # Normalize
+
+average_volume_1s = [0] * (average_volume_range // 2)
+
+for i in tqdm(range(len(average_volume) - average_volume_range)):
+    average_volume_1s.append(np.mean(average_volume[i:i+average_volume_range]))
+
+average_volume = list(average_volume)
+average_volume_1s = average_volume_1s + [0] * (average_volume_range // 2)
+
+daredevil_range_in_seconds = range_in_seconds[youtube_start:youtube_end][:len(average_volume)]
+print(len(daredevil_range_in_seconds), len(average_volume))
+
+# Note: this seems to crash if used on a non-static plot
 forest_figure = go.Figure(layout={"title": "Random Forest Predictors"})
-forest_figure.add_trace(go.Scatter(x=range_in_seconds, y=forest_predictions, name="Random Forest Toxicity"))
-forest_figure.add_trace(go.Scatter(x=range_in_seconds, y=vader_predictions, name="VADER Toxicity"))
+forest_figure.add_trace(go.Scattergl(x=range_in_seconds, y=forest_predictions, name="Random Forest Toxicity"))
+forest_figure.add_trace(go.Scattergl(x=range_in_seconds, y=vader_predictions, name="VADER Toxicity"))
+# forest_figure.add_trace(go.Scatter(x=daredevil_range_in_seconds, y=average_volume, name="Normalized Volume"))
+forest_figure.add_trace(go.Scatter(x=daredevil_range_in_seconds, y=average_volume_1s, name="Averaged Volume"))
 
 forest_figure.update_xaxes(title="Time (Seconds)")
 forest_figure.update_yaxes(title="Toxicity")
@@ -559,7 +599,7 @@ initial_feature_selection = corr_matrix.columns[:10]
 
 app.layout = html.Div(children=[
     html.P(id="hidden-div", style={"display": "none"}, title="none"),
-    html.H1(children='MINTS Biometric Analysis'),
+    html.Center(children=[html.H1(children='MINTS Biometric Analysis')]),
     html.Div(children=[
         html.Div(children=[
             html.Center(children=[
@@ -621,7 +661,7 @@ app.layout = html.Div(children=[
         html.Center(children=[html.H2(children='Models')]),
         html.Div(children=[
             html.H2(children="Sentiment Analysis"),
-            dcc.Graph(id='video_sentiment', figure=forest_figure)
+            dcc.Graph(id='video_sentiment', figure=forest_figure, config={"editable": False, "staticPlot": True})
         ], style={"border": "1px solid gray", "margin": "5px"}),
         html.Div(children=[
             html.H2(children="EEG-Assisted Speech Recognition"),
