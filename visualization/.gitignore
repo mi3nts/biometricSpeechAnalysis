@@ -1,4 +1,3 @@
 nlp_data/**
-MINTS.zip
-LargeMINTS.zip
+large_nlp_data/**
 _temp.zip
