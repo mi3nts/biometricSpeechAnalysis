@@ -65,6 +65,17 @@
         firstScript.parentNode.insertBefore(tag, firstScript);
     }
 
+    // TODO: Hack the dcc.graphs so that they have an extra trace that shows the current video position
+    /* setInterval(() => {
+        for(let key in window.videos) {
+            let video = window.videos[key];
+            if(video.getPlayerState() == YT.PlayerState.PLAYING) {
+                '<rect class="blahblah" data-subplot="xy" x="80" y="100" width="2" height="300" style="fill: black; stroke-width: 0;"></rect>';
+
+            }
+        }
+    }) */
+
     console.log("Script inserted");
     return style;
 })

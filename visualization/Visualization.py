@@ -7,13 +7,6 @@ import argparse
 import base64
 import json
 
-ap = argparse.ArgumentParser(description="Visualize EEG data")
-
-ap.add_argument("zip_password", help="The password for the MINTS zip (not included for security reasons)")
-
-args = ap.parse_args()
-
-
 # Prepare environment
 import os
 import subprocess
@@ -48,15 +41,22 @@ nltk_thread = threading.Thread(target=lambda: nltk.download("popular", quiet=Tru
 nltk_thread.setDaemon(True)
 nltk_thread.start()
 
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+
 from nltk.corpus import wordnet as wn
 from nltk import word_tokenize, pos_tag
+
+# Progress bars
+from tqdm import tqdm
 
 # Matplotlib (alternative to dash for simple debugging graphs)
 import matplotlib.pyplot as plt
 # Do not enable interactive mode
 #plt.ion()
 
-from urllib.request import urlretrieve
+from urllib.request import urlopen, Request, urlretrieve
+from io import BytesIO
+from PIL import Image
 
 # Import dash selectively
 import dash
@@ -75,6 +75,15 @@ to_open = "MINTS.zip" # Replace with LargeMINTS.zip for the large dataset
 nlp_data = "large_nlp_data" if "Large" in to_open else "nlp_data"
 
 if not os.path.exists(os.path.join(nlp_data, "./2022_01_14_T04_U002_EEG01/2022_01_14_T04_U002_EEG01.vhdr")):
+    print("No", nlp_data, "directory found! Try using a password to extract the zipfile that's hopefully in ../data")
+    print("...or you could just unzip the MINTS.zip file into a directory called", nlp_data, "in the CWD")
+    
+    ap = argparse.ArgumentParser(description="Visualize EEG data")
+    
+    ap.add_argument("zip_password", help="The password for the MINTS zip (not included for security reasons)")
+    
+    args = ap.parse_args()
+    
     zip_password = args.zip_password
 
     root_dir = os.path.split(os.path.abspath("."))[0]
@@ -89,12 +98,17 @@ if not os.path.exists(forest_predictions_path):
     print("Downloading", forest_predictions_path)
     urlretrieve("https://personal.utdallas.edu/~rdc180001/forest_toxicity_predictions.csv", forest_predictions_path)
 
-forest_predictions = pd.read_csv(forest_predictions_path, header=None)
+forest_predictions = pd.read_csv(forest_predictions_path, header=None)[0]
 
 forest_predictions_pickle = os.path.join(nlp_data, "forest_regressor.pickle")
 if not os.path.exists(forest_predictions_pickle):
     print("Downloading", forest_predictions_pickle)
     urlretrieve("https://personal.utdallas.edu/~rdc180001/new_regressor.pickle", forest_predictions_pickle)
+
+user_agent = "MINTSRequester/1.0" #"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.83 Safari/537.36"
+bio = BytesIO(urlopen(Request("https://cdn.discordapp.com/attachments/911339282537529419/956940719648563250/EEG_10-10_system.png", headers={"User-Agent": user_agent})).read())
+
+eeg_img = np.array(Image.open(bio).convert('RGB'))
 
 # We assume the biometric model is one directory up
 sys.path.append(os.path.split(os.path.abspath("."))[0])
@@ -239,8 +253,6 @@ TODO:
  - Add some per-feature graphs
 """
 
-from nltk.sentiment.vader import SentimentIntensityAnalyzer
-
 #import plotly.express as px
 #px.data.tips()
 
@@ -249,64 +261,6 @@ import plotly.express as px
 import math
 
 srate = samplerate #512
-
-def get_timestamp(i):
-  timestamp = str(math.floor(i / srate / 3600) % 60).rjust(2, '0') + ":" + str(math.floor(i / srate / 60) % 60).rjust(2, '0') + ":"
-  timestamp += str(math.floor(i / srate) % 60).rjust(2, '0')
-  return timestamp
-
-framewindow = 10
-_res = None
-
-sid = SentimentIntensityAnalyzer()
-def update_metrics(slider):
-  global _res
-  i = max(0, slider * srate - 1) # int((time.time() - start) * srate) % len(df_eeg_data["FT7fft"])
-  if i > len(df_eeg_data):
-    return dash.no_update#, "Index " + str(i) + " out of bounds"
-  word = caption_text[df_eeg_data["Caption"][i]]
-  _words = word.strip().split()
-  #print("A")
-  scores = sid.polarity_scores(word)
-  #print("B")
-  timestamp = get_timestamp(i)
-  sentiment = [
-    html.H2("Sentiment Analysis"),
-    html.Div(children=["Word: " + repr(word).replace("'", '"')]),
-    html.Div(children=["Timestamp: " + timestamp]),
-    html.Div(children=["Sentiment analysis: " + ", ".join("{0}: {1}".format(k, scores[k]) for k in sorted(scores.keys()))])
-  ]
-  vader_results = {word: sid.polarity_scores(word) for word in _words}
-  graph_data = {"neu": [vader_results[word]["neu"] for word in _words],
-                "word": _words}
-
-  '''sentiment.append(dcc.Graph(
-      figure=px.bar(
-          graph_data, x="word", y="neu",
-          color=["neu"]
-      )
-  ))'''
-  
-  #print("C")
-  # https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.welch.html ?
-  results = show_fft_data(df_eeg_data["FT7fft"][i], df_eeg_data["FT7phase"][i], df_eeg_data["Time"], show=False, _start=i)
-  results = [
-    html.Div(style={"display": "flex"}, children=results[:2])
-  ] + results[2:]
-  results = results + sentiment
-  #print(results)
-  _res = (time.time(), results)
-  return results
-
-from urllib.request import urlopen, Request
-from io import BytesIO
-from PIL import Image
-
-user_agent = "MINTSRequester/1.0" #"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.83 Safari/537.36"
-bio = BytesIO(urlopen(Request("https://cdn.discordapp.com/attachments/911339282537529419/956940719648563250/EEG_10-10_system.png", headers={"User-Agent": user_agent})).read())
-
-# eeg_img = np.array(Image.new("RGB", (500, 500), color=(255, 255, 255)))
-eeg_img = np.array(Image.open(bio).convert('RGB'))
 
 """
 Usaid's just-added stuff
@@ -336,7 +290,7 @@ def _update_corr_fig(input_value):
 def update_corr_fig(input_value):
     return _update_corr_fig(input_value)
 
-range_in_seconds = (np.arange(len(forest_predictions[0])) / samplerate)
+range_in_seconds = (np.arange(len(forest_predictions)) / samplerate)
 
 def display_time_series(series_feature, title="Time Series Data", max_features=20):
     fig = go.Figure(layout={"title": title})
@@ -351,8 +305,46 @@ def display_time_series(series_feature, title="Time Series Data", max_features=2
             break
     return fig
 
+def generate_vader_predictions():
+    """Generates the vader predictions for this dataframe (to be done offline due to the horrific inefficiency of this
+       function."""
+    sia = SentimentIntensityAnalyzer()
+    
+    frame_in_seconds = 4
+    frame_in_intervals = frame_in_seconds * samplerate
+    vader_predictions = [0] * (frame_in_intervals // 2)
+    
+    
+    for i in tqdm(range(len(df_eeg_data["Caption"]) - frame_in_intervals)):
+        text = []
+        last = -1
+        for j in range(i, i + frame_in_intervals):
+            index = df_eeg_data["Caption"][j]
+            if index != last:
+                last = index
+                text.append(caption_text[index])
+        
+        vader_predictions.append(sia.polarity_scores(' '.join(text))["neg"])
+    
+    vader_predictions += [0] * (frame_in_intervals // 2)
+    return vader_predictions
+
+vader_predictions_path = os.path.join(nlp_data, "vader_predictions.csv")
+if not os.path.exists(vader_predictions_path):
+    print("Generating vader predictions (warning -- this might take quite a while)")
+    vader_predictions = generate_vader_predictions()
+    f = open(vader_predictions_path, "w")
+    for pred in vader_predictions:
+        f.write(str(pred) + "\n")
+    f.close()
+else:
+    vader_predictions = pd.read_csv(vader_predictions_path, header=None)[0]
+
+vader_predictions *= 100.0 # Scale properly
+
 forest_figure = go.Figure(layout={"title": "Random Forest Predictors"})
-forest_figure.add_trace(go.Scatter(x=range_in_seconds, y=forest_predictions[0], name="Toxicity"))
+forest_figure.add_trace(go.Scatter(x=range_in_seconds, y=forest_predictions, name="Random Forest Toxicity"))
+forest_figure.add_trace(go.Scatter(x=range_in_seconds, y=vader_predictions, name="VADER Toxicity"))
 
 @app.callback(
     Output('time_series', 'figure'),
@@ -586,7 +578,7 @@ app.layout = html.Div(children=[
                           'height': '100%', 'padding': '0', 'margin': '0', 'margin-bottom': '5px'})
             ], style={'width': '100%'}),
             html.Div(children=[
-                html.H2(children="Videos"),
+                html.Center(children=[html.H2(children="Videos")]),
                 html.Div(children=[
                     html.Div(children=[
                         html.Center(children=[html.H3(children="Eyestream")]),
@@ -598,10 +590,10 @@ app.layout = html.Div(children=[
                     ], style={'display': 'inline-block', 'margin': '5px', 'border': '1px dotted gray'})
                 ], style={"display": "flex", 'border': '1px solid gray'}),
             ])
-        ], style={'border': '1px solid black', 'width': '99%'}),
-    ]),
+        ], style={'border': '1px solid black', 'width': '99%', "margin": "5px"}),
+    ], style={}),
     html.Div(children=[
-        html.H2(children='Exploratory Data Analysis'),
+        html.Center(children=[html.H2(children='Exploratory Data Analysis')]),
         html.Div(children=[
             html.Div(children=[
                 html.Div(children=[
@@ -621,17 +613,21 @@ app.layout = html.Div(children=[
                 ], style={})
             ]),
         ])
-    ], style={'border': '1px solid black'}),
+    ], style={'border': '1px solid black', "margin": "5px"}),
     html.Div(children=[
-        html.H2(children='Models'),
+        html.Center(children=[html.H2(children='Models')]),
         html.Div(children=[
             html.H2(children="Sentiment Analysis"),
             dcc.Graph(id='video_sentiment', figure=forest_figure)
-        ], style={"border": "1px solid gray"})
-    ], style={"border": "1px solid black"})
+        ], style={"border": "1px solid gray", "margin": "5px"}),
+        html.Div(children=[
+            html.H2(children="EEG-Assisted Speech Recognition"),
+            html.H1(children="?")
+        ], style={"border": "1px solid gray", "margin": "5px"})
+    ], style={"border": "1px solid black", "margin": "5px"})
 ])
 
-app.run_server() #mode="inline", debug=True, port=1051
+app.run_server()
 
 exit()
 
