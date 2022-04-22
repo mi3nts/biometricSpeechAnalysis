@@ -7,6 +7,8 @@ Original file is located at
     https://colab.research.google.com/drive/1nGuMVrvAVbVV_ODxyO1mOdgAR7FHm-DZ
 """
 import argparse
+import base64
+import json
 
 ap = argparse.ArgumentParser(description="Visualize EEG data")
 
@@ -226,7 +228,7 @@ def do_fft(data, label):
 
 #do_fft(fakedata, "T")
 
-do_fft(df_eeg_data, "FT7")
+#do_fft(df_eeg_data, "FT7")
 
 rng = np.arange(-fftsize / 2, fftsize / 2) * sampleduration / fftsize
 
@@ -319,7 +321,10 @@ from sklearn.preprocessing import MinMaxScaler
 n = 2
 pca = PCA(n_components=n)
 #print(norm_df_eeg_data.columns[norm_df_eeg_data.isna().any()].tolist())
-filtered_eeg_data = norm_df_eeg_data.drop(['FT7fft', 'FT7phase'], axis=1)
+try:
+    filtered_eeg_data = norm_df_eeg_data.drop(['FT7fft', 'FT7phase'], axis=1)
+except KeyError:
+    filtered_eeg_data = norm_df_eeg_data
 pc = pca.fit_transform(filtered_eeg_data)
 pc_df = pd.DataFrame(data=pc, columns=[f'PC{i}' for i in range(n)])
 var_df = pd.DataFrame({'var':pca.explained_variance_ratio_, 'PC':[f'PC{i}' for i in range(n)]})
@@ -416,27 +421,37 @@ external_sheets = ["https://fonts.googleapis.com/icon?family=Material+Icons"]
 
 app = Dash(__name__, external_stylesheets=external_sheets)
 
-@app.callback(
-    Output(component_id='eda_corr', component_property='figure'),
-    Input(component_id='eda_feats', component_property='value')
-)
-def update_corr_fig(input_value):
+def _update_corr_fig(input_value):
     cols_idx = [corr_matrix.columns.get_loc(c) for c in input_value]
     filtered_corr_mat = corr_matrix[input_value].iloc[cols_idx]
     corr_fig = px.imshow(filtered_corr_mat, color_continuous_scale='RdBu_r', title='Pearson-Coefficient Heatmap', range_color=[-1, 1])
     corr_fig.update_layout(transition_duration=500)
     return corr_fig
 
-def display_time_series(series_feature):
-    fig = go.Figure()
-    for feat in series_feature:
-        fig.add_trace(go.Scatter(x=df_eeg_data[feat].index, y=df_eeg_data[feat].values, name=feat))
+@app.callback(
+    Output(component_id='eda_corr', component_property='figure'),
+    Input(component_id='eda_feats', component_property='value')
+)
+def update_corr_fig(input_value):
+    return _update_corr_fig(input_value)
+
+def display_time_series(series_feature, title="Time Series Data", max_features=20):
+    fig = go.Figure(layout={"title": title})
+    for i, feat in enumerate(series_feature):
+        try:
+            fig.add_trace(go.Scatter(x=df_eeg_data[feat].index, y=df_eeg_data[feat].values, name=feat))
+        except KeyError:
+            pass # Quietly ignore
+        
+        if i + 1 > max_features:
+            fig.update_layout({"title": title + f"(only first {max_features} shown for performance reasons)"})
+            break
     return fig
 
 
 @app.callback(
     Output('time_series', 'figure'),
-    Input('eda_feats', 'value')
+    Input('viz_feats', 'value')
 )
 def update_time_series(series_feature):
   return display_time_series(series_feature)
@@ -528,18 +543,26 @@ def eeg_heatmap(slider):
                 color = 'blue'
             fig.add_shape(editable=False, fillcolor=color, type='circle', \
                 x0=pos[feat][0][0], y0=pos[feat][0][1], x1=pos[feat][1][0], y1=pos[feat][1][1], \
-                    opacity=weight)
+                    opacity=weight, name=feat)
+    # legend
+    fig.update_layout(showlegend=False, title="EEG Heatmap")
+
+    # x axis
+    fig.update_xaxes(visible=False)
+
+    # y axis
+    fig.update_yaxes(visible=False)
     return fig
 
 @app.callback(
     Output('eeg_heatmap', 'figure'),
-    Input('time_slider', 'value')
+    Input('eeg_slider', 'value')
 )
 def eeg_heatmap_callback(slider):
   return eeg_heatmap(slider)
 
 enable_automatic_play = False
-@app.callback(
+'''@app.callback(
     Output('other_charts', 'children'),
     Input('time_slider', 'value')
 )
@@ -550,7 +573,7 @@ def metrics(slider):
   try:
     return update_metrics(slider)
   except Exception as e:
-    _res = e
+    _res = e'''
 
 @app.callback(
     Output("play_button", "children"),
@@ -571,7 +594,7 @@ def pbtn(n_clicks):
 minTime = df_eeg_data['Time'].min()
 maxTime = df_eeg_data['Time'].max()
 
-@app.callback(
+'''@app.callback(
     Output("time_slider", "value"),
     State("time_slider", "value"),
     Input('play_interval', 'n_intervals')
@@ -580,15 +603,15 @@ def updt(slider, intervals):
   ctx = dash.callback_context
   if not ctx.triggered or not enable_automatic_play: return dash.no_update
 
-  return max(minTime, min(maxTime - 1, slider + 1))
+  return max(minTime, min(maxTime - 1, slider + 1))'''
 
-@app.callback(
+'''@app.callback(
     Output("timestamp", "children"),
     State("time_slider", "value"),
     Input('play_interval', 'n_intervals')
 )
 def ts_updt(slider, interval):
-  return [str(get_timestamp(slider))]
+  return [str(get_timestamp(slider))]'''
 
 @app.callback(
     Output("eda_feats", "value"),
@@ -598,59 +621,15 @@ def proc(n_clicks):
   if n_clicks is None or n_clicks == 0: return dash.no_update#, ""
   return corr_matrix.columns
 
-pca_fig = px.scatter(pc_df, x='PC0', y='PC1', title='PCA Scatterplot')
+pca_fig = px.scatter(pc_df, x='PC0', y='PC1', title='Principle Component Analysis Scatterplot')
 
-yt_script = """
-((style) => {
-    window.videos = window.videos || {};
-    const videos = [vidids];
-    
-    function onStateChange(event) {
-        
-    }
-    
-    window.onYouTubeIframeAPIReady = function() {
-        Object.keys(videos).forEach(video) {
-            videoData = videos[video];
-            let player = new YT.Player(video, {
-                width:  "260",
-                height: "960",
-                videoId: "",
-                playerVars: {
-                    playsinline: 1
-                },
-                events: {
-                    onReady: (event) {
-                        console.log("Player ready");
-                    },
-                    onStateChange: onStateChange
-                }
-            });
-            
-            window.videos[video] = player;
-        }
-    };
-    
-    if(!window.ytLoaded) {
-        window.ytLoaded = true;
-        
-        var tag = document.createElement("script");
-        tag.src = "https://www.youtube.com/iframe_api";
-        var firstScript = document.getElementsByTagName("script")[0];
-        console.log(firstScript);
-        firstScript.parentNode.insertBefore(tag, firstScript);
-    }
-    
-    console.log("Script inserted");
-    return style;
-})
-"""
+yt_script = open("yt_script.js", "r", encoding="utf-8").read()
 
 videoValues = {
     'eyestream_video': {
         'id': '2HBYjxtLcHY',
-        'width': '0',
-        'height': '0'
+        'width': '260',
+        'height': '960'
     },
     
     'main_video': {
@@ -661,36 +640,80 @@ videoValues = {
 }
 
 app.clientside_callback(
-    yt_script.replace("[vidids]", ),
+    yt_script.replace("[vidids]", json.dumps(videoValues)),
     Output("hidden-div", "style"),
     Input("hidden-div", "style")
 )
+
+initial_feature_selection = corr_matrix.columns[:10]
+
+'''app.clientside_callback(
+    """function() {
+        $('cor_update').css('filter', 'gray');
+        return [];
+    }""",
+    Output("hidden-div", "children"),
+    Input("show_all_button", "n_clicks"),
+    Input("eda_feats", "n_clicks")
+)'''
 
 app.layout = html.Div(children=[
     html.P(id="hidden-div", style={"display": "none"}, title="none"),
     html.H1(children='MINTS Biometric Analysis'),
     html.Div(children=[
+        html.Div(children=[
+            html.Center(children=[
+                html.H2(children="Dataset Visualization"),
+                ]),
+            html.Div(children=[
+                html.Div(children=[
+                    dcc.Graph(id='time_series', figure=display_time_series(initial_feature_selection)),
+                    html.Button("Show All Features (may cause lag)", id="show_all_button1", n_clicks=0),
+                    dcc.Dropdown(id='viz_feats', options=corr_matrix.columns, value=initial_feature_selection, multi=True),
+                ], style={'display': 'inline-block', 'width': '49%',
+                          'height': '100%', 'border-right': '', 'padding': '0', 'margin': '0', 'margin-bottom': '5px'}),
+                html.Div(children=[
+                    dcc.Graph(id="eeg_heatmap", figure=eeg_heatmap(minTime)),
+                    html.Div(style={"height": "34px", "display": "inline-block"}),
+                    dcc.Slider(id='eeg_slider', value=minTime, min=minTime, max=maxTime)
+                    # ], style={"float": "right", "width": "96%"})
+                ], style={'display': 'inline-block', 'width': '49%',  # 'min-height': '500px',
+                          'height': '100%', 'padding': '0', 'margin': '0', 'margin-bottom': '5px'})
+            ], style={'width': '100%'}),
+            html.Div(children=[
+                html.H2(children="Videos"),
+                html.Div(children=[
+                    html.Div(children=[
+                        html.H3(children="Eyestream"),
+                        html.Div(id="eyestream_video"),
+                        html.H3(children="Main Video"),
+                        html.Div(id="main_video")
+                    ]),
+                ], style={"display": "flex", 'border': '1px solid blue'}),
+            ])
+        ], style={'border': '1px solid black', 'width': '99%'}),
+    ]),
+    html.Div(children=[
         html.H2(children='Exploratory Data Analysis'),
-        html.H4(children='Data Features'),
-        html.Button("Show All Features", id="show_all_button", n_clicks=0),
-        dcc.Dropdown(id='eda_feats', options=corr_matrix.columns, value=corr_matrix.columns[:10], multi=True),
-        html.Div(children=[
-            html.H3(children='Correlations'),
-            html.Div(children=[
-                html.Div(children=[
-                    dcc.Graph(id='eda_corr')
-                ], style={'display': 'inline-block', 'width': '30%', 'verticalAlign': 'top'}),
-                html.Div(children=[
-                    dcc.Graph(id='time_series', figure=display_time_series(corr_matrix.columns[:10])),
-                ], style={'display': 'inline-block', 'width': '70%', 'verticalAlign': 'top'}),
-            ]),
-        ]),
         html.Div(children=[
             html.Div(children=[
-                html.H3(children="Eyestream"),
-                html.Div(id="eyestream_vid")
+                html.Div(children=[
+                    dcc.Graph(id='eda_corr', figure=_update_corr_fig(initial_feature_selection),
+                              config={"editable": False, "staticPlot": True}),
+                    html.Div(children=[
+                        html.Button("Show All Features", id="show_all_button", n_clicks=0),
+                        dcc.Dropdown(id='eda_feats', options=corr_matrix.columns, value=initial_feature_selection,
+                                     multi=True),
+                    ], style={'display': 'inline-block', 'margin-left': '30px', 'margin-right': '5px',
+                              'margin-bottom': '5px'}),
+                ], style={'display': 'inline-block', 'border': '1px solid gray', 'width': '98%'}),
+                html.Div(children=[
+                    #html.H4(children='Principle Component Analysis'),
+                    dcc.Graph(id='eda_pca', figure=pca_fig,
+                              config={"editable": False, "staticPlot": True})
+                ], style={"border": "1px solid gray"})
             ]),
-        ], style={"display": "flex"}),
+        ], style={'border': '1px solid black'}),
         html.H2(children='Per-timestep Analysis'),
         html.Div(children=[
           html.H4(children='Timestep', style={"backgroundColor": "inherit"}),
@@ -702,18 +725,8 @@ app.layout = html.Div(children=[
               html.Div(children=[dcc.Slider(id='time_slider', value=minTime, min=minTime, max=maxTime)], style={"float": "right", "width": "96%"})
           ])
         ], style={"position": "sticky", "top": "10px", "backgroundColor": "rgba(255, 255, 255, 0.4)", "zIndex": "10000"}),
-        html.H4('EEG Heatmap'),
-        dcc.Graph(id='eeg_heatmap', figure=eeg_heatmap(minTime)),
-        html.Div(children=[
-            html.H4(children="Textual Charts"),
-            html.Div(id="other_charts", children=update_metrics(minTime))
-        ]),
-        html.Div(children=[
-            html.H4(children='Principle Component Analysis'),
-            dcc.Graph(id='eda_pca', figure=pca_fig)
-        ])
     ]),
-    dcc.Interval(id='play_interval', interval=1000, n_intervals=0)
+    #dcc.Interval(id='play_interval', interval=1000, n_intervals=0)
 ])
 
 app.run_server() #mode="inline", debug=True, port=1051
