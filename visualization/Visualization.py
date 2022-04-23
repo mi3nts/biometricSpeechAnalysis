@@ -43,6 +43,8 @@ import struct
 
 # We can just download this asynchronously
 nltk.download('vader_lexicon')
+
+# Probably unnecessary?
 nltk_thread = threading.Thread(target=lambda: nltk.download("popular", quiet=True))
 nltk_thread.setDaemon(True)
 nltk_thread.start()
@@ -366,7 +368,7 @@ with wave.open(os.path.join(nlp_data, "BadTalk.wav"), "rb") as wav:
     frames = resampler(np.linspace(0, 1, int(np.ceil(samplerate / wav.getframerate() * nframes))))
 
 average_volume_range = 1 * samplerate
-average_volume = frames / np.max(frames) * 100.0 # Normalize
+average_volume = np.abs(frames / np.max(frames) * 100.0 - 50) * 2.0 # Normalize
 
 average_volume_1s = [0] * (average_volume_range // 2)
 
@@ -377,7 +379,6 @@ average_volume = list(average_volume)
 average_volume_1s = average_volume_1s + [0] * (average_volume_range // 2)
 
 daredevil_range_in_seconds = range_in_seconds[youtube_start:youtube_end][:len(average_volume)]
-print(len(daredevil_range_in_seconds), len(average_volume))
 
 # Note: this seems to crash if used on a non-static plot
 forest_figure = go.Figure(layout={"title": "Random Forest Predictors"})
@@ -558,7 +559,7 @@ def ts_updt(slider, interval):
     Input("show_all_button", "n_clicks")
 )
 def proc(n_clicks):
-  if n_clicks is None or n_clicks == 0: return dash.no_update#, ""
+  if n_clicks is None or n_clicks == 0: return dash.no_update
   return corr_matrix.columns
 
 pca_fig = px.scatter(pc_df, x='PC0', y='PC1', title='Principle Component Analysis Scatterplot')
