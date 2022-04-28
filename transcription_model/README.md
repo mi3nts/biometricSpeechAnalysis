@@ -1,5 +1,7 @@
 Use `python initial_model.py` to run the model.
 
+This was made using Pytorch Lightning (which uses Pytorch on the backend while providing useful training routines/functionality such as a training dashboard and specific sampling methods).
+
 How the code is set up:
  - `initial_model.py` = contains the main model training routine
  - `model_utils.py` = contains the associated Pytorch/Pytorch Lightning modules that make up the model/dataset/optimizer
