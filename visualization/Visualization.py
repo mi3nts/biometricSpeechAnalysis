@@ -79,10 +79,18 @@ try:
 except ImportError:
     from dash import Dash
 
+from detoxify import Detoxify
+
+def get_toxicity_of_text(text):
+  results = Detoxify('original').predict(text)
+  return results["toxicity"] * 100
+
 to_open = "MINTS.zip" # Replace with LargeMINTS.zip for the large dataset
 nlp_data = "large_nlp_data" if "Large" in to_open else "nlp_data"
 
-if not os.path.exists(os.path.join(nlp_data, "./2022_01_14_T04_U002_EEG01/2022_01_14_T04_U002_EEG01.vhdr")):
+FILE_PATH = "./2022_01_14_T04_U002_EEG01/2022_01_14_T04_U002_EEG01.vhdr"
+
+if not os.path.exists(os.path.join(nlp_data, FILE_PATH)):
     print("No", nlp_data, "directory found! Try using a password to extract the zipfile that's hopefully in ../data")
     print("...or you could just unzip the MINTS.zip file into a directory called", nlp_data, "in the CWD")
     
@@ -172,7 +180,7 @@ def read_eeg(vhdr_fname):
     
     return df_eeg_data, youtube_start, youtube_end
 
-df_eeg_data, youtube_start, youtube_end = read_eeg(os.path.join(nlp_data, "2022_01_14_T04_U002_EEG01/2022_01_14_T04_U002_EEG01.vhdr"))
+df_eeg_data, youtube_start, youtube_end = read_eeg(os.path.join(nlp_data, FILE_PATH))
 
 yt_wav = "BadTalk.wav"
 if not os.path.exists(os.path.join(nlp_data, "BadTalk.wav.en.vtt")):
@@ -320,8 +328,10 @@ def generate_vader_predictions():
     
     frame_in_seconds = 4
     frame_in_intervals = frame_in_seconds * samplerate
-    vader_predictions = [0] * (frame_in_intervals // 2)
     
+    vader_predictions = [0] * (frame_in_intervals // 2)
+    detox_predictions = [0] * len(vader_predictions)
+    text_sections = {}
     
     for i in tqdm(range(len(df_eeg_data["Caption"]) - frame_in_intervals)):
         text = []
@@ -332,23 +342,42 @@ def generate_vader_predictions():
                 last = index
                 text.append(caption_text[index])
         
-        vader_predictions.append(sia.polarity_scores(' '.join(text))["neg"])
-    
+        temp_text = ' '.join(text)
+        if temp_text not in text_sections:
+            vp, dp = sia.polarity_scores(temp_text)["neg"], get_toxicity_of_text(temp_text)
+            text_sections[temp_text] = (vp, dp)
+        else:
+            vp, dp = text_sections[temp_text]
+        vader_predictions.append(vp)
+        detox_predictions.append(dp)
+
     vader_predictions += [0] * (frame_in_intervals // 2)
-    return vader_predictions
+    detox_predictions += [0] * (frame_in_intervals // 2)
+    
+    return vader_predictions, detox_predictions
 
 vader_predictions_path = os.path.join(nlp_data, "vader_predictions.csv")
-if not os.path.exists(vader_predictions_path):
+detox_predictions_path = vader_predictions_path.replace("vader", "detox")
+if not os.path.exists(vader_predictions_path) or not os.path.exists(detox_predictions_path):
     print("Generating vader predictions (warning -- this might take quite a while)")
-    vader_predictions = generate_vader_predictions()
+    vader_predictions, detox_predictions = generate_vader_predictions()
     f = open(vader_predictions_path, "w")
+    for pred in vader_predictions:
+        f.write(str(pred) + "\n")
+    f.close()
+    f = open(detox_predictions_path, "w")
     for pred in vader_predictions:
         f.write(str(pred) + "\n")
     f.close()
 else:
     vader_predictions = pd.read_csv(vader_predictions_path, header=None)[0]
+    detox_predictions = pd.read_csv(detox_predictions_path, header=None)[0]
+
+vader_predictions = np.array(vader_predictions)
+detox_predictions = np.array(detox_predictions)
 
 vader_predictions *= 100.0 # Scale properly
+detox_predictions *= 100.0 # Scale properly
 
 with wave.open(os.path.join(nlp_data, "BadTalk.wav"), "rb") as wav:
     frames = []
@@ -601,11 +630,23 @@ initial_feature_selection = corr_matrix.columns[:10]
 app.layout = html.Div(children=[
     html.P(id="hidden-div", style={"display": "none"}, title="none"),
     html.Center(children=[html.H1(children='MINTS Biometric Analysis')]),
+    html.P(className="description", children=
+           "Loaded " + repr(FILE_PATH) + ". "
+           "This dashboard displays data taken from the Electroencephalogram (EEG) file specified. It performs basic "
+           "visual and exploratory analysis on the data, and it displays the results of recent machine learning models "
+           "that learned from it."
+    ),
     html.Div(children=[
         html.Div(children=[
             html.Center(children=[
                 html.H2(children="Dataset Visualization"),
                 ]),
+            html.P(className="description", children=
+                   "Data visualization is necessary to get a feel with the data we're workign with. In the Time Series "
+                   "Data section, we plot the raw values of the EEG waveform vs. time; in the EEG Heatmap section, we "
+                   "can see the relative values of the waveforms arranged corresponding to the physical position of the "
+                   "sensors on the human subject."
+            ),
             html.Div(children=[
                 html.Div(children=[
                     dcc.Graph(id='time_series', figure=display_time_series(initial_feature_selection)),
