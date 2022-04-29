@@ -79,10 +79,18 @@ try:
 except ImportError:
     from dash import Dash
 
+from detoxify import Detoxify
+
+def get_toxicity_of_text(text):
+  results = Detoxify('original').predict(text)
+  return results["toxicity"] * 100.0
+
 to_open = "MINTS.zip" # Replace with LargeMINTS.zip for the large dataset
 nlp_data = "large_nlp_data" if "Large" in to_open else "nlp_data"
 
-if not os.path.exists(os.path.join(nlp_data, "./2022_01_14_T04_U002_EEG01/2022_01_14_T04_U002_EEG01.vhdr")):
+FILE_PATH = "./2022_01_14_T04_U002_EEG01/2022_01_14_T04_U002_EEG01.vhdr"
+
+if not os.path.exists(os.path.join(nlp_data, FILE_PATH)):
     print("No", nlp_data, "directory found! Try using a password to extract the zipfile that's hopefully in ../data")
     print("...or you could just unzip the MINTS.zip file into a directory called", nlp_data, "in the CWD")
     
@@ -172,7 +180,7 @@ def read_eeg(vhdr_fname):
     
     return df_eeg_data, youtube_start, youtube_end
 
-df_eeg_data, youtube_start, youtube_end = read_eeg(os.path.join(nlp_data, "2022_01_14_T04_U002_EEG01/2022_01_14_T04_U002_EEG01.vhdr"))
+df_eeg_data, youtube_start, youtube_end = read_eeg(os.path.join(nlp_data, FILE_PATH))
 
 yt_wav = "BadTalk.wav"
 if not os.path.exists(os.path.join(nlp_data, "BadTalk.wav.en.vtt")):
@@ -320,8 +328,10 @@ def generate_vader_predictions():
     
     frame_in_seconds = 4
     frame_in_intervals = frame_in_seconds * samplerate
-    vader_predictions = [0] * (frame_in_intervals // 2)
     
+    vader_predictions = [0] * (frame_in_intervals // 2)
+    detox_predictions = [0] * len(vader_predictions)
+    text_sections = {}
     
     for i in tqdm(range(len(df_eeg_data["Caption"]) - frame_in_intervals)):
         text = []
@@ -332,23 +342,42 @@ def generate_vader_predictions():
                 last = index
                 text.append(caption_text[index])
         
-        vader_predictions.append(sia.polarity_scores(' '.join(text))["neg"])
-    
+        temp_text = ' '.join(text)
+        if temp_text not in text_sections:
+            vp, dp = sia.polarity_scores(temp_text)["neg"], get_toxicity_of_text(temp_text)
+            text_sections[temp_text] = (vp, dp)
+        else:
+            vp, dp = text_sections[temp_text]
+        vader_predictions.append(vp)
+        detox_predictions.append(dp)
+
     vader_predictions += [0] * (frame_in_intervals // 2)
-    return vader_predictions
+    detox_predictions += [0] * (frame_in_intervals // 2)
+    
+    return vader_predictions, detox_predictions
 
 vader_predictions_path = os.path.join(nlp_data, "vader_predictions.csv")
-if not os.path.exists(vader_predictions_path):
+detox_predictions_path = vader_predictions_path.replace("vader", "detox")
+if not os.path.exists(vader_predictions_path) or not os.path.exists(detox_predictions_path):
     print("Generating vader predictions (warning -- this might take quite a while)")
-    vader_predictions = generate_vader_predictions()
+    vader_predictions, detox_predictions = generate_vader_predictions()
     f = open(vader_predictions_path, "w")
     for pred in vader_predictions:
         f.write(str(pred) + "\n")
     f.close()
+    f = open(detox_predictions_path, "w")
+    for pred in detox_predictions:
+        f.write(str(pred) + "\n")
+    f.close()
+
+    vader_predictions = np.array(vader_predictions)
+    detox_predictions = np.array(detox_predictions)
 else:
     vader_predictions = pd.read_csv(vader_predictions_path, header=None)[0]
+    detox_predictions = pd.read_csv(detox_predictions_path, header=None)[0]
 
 vader_predictions *= 100.0 # Scale properly
+# detox_predictions *= 100.0
 
 with wave.open(os.path.join(nlp_data, "BadTalk.wav"), "rb") as wav:
     frames = []
@@ -380,15 +409,17 @@ average_volume_1s = average_volume_1s + [0] * (average_volume_range // 2)
 
 daredevil_range_in_seconds = range_in_seconds[youtube_start:youtube_end][:len(average_volume)]
 
+#import code; code.interact(local=locals())
+
 # Note: this seems to crash if used on a non-static plot
 forest_figure = go.Figure(layout={"title": "Random Forest Predictors"})
 forest_figure.add_trace(go.Scattergl(x=range_in_seconds, y=forest_predictions, name="Random Forest Toxicity"))
 forest_figure.add_trace(go.Scattergl(x=range_in_seconds, y=vader_predictions, name="VADER Toxicity"))
-# forest_figure.add_trace(go.Scatter(x=daredevil_range_in_seconds, y=average_volume, name="Normalized Volume"))
-forest_figure.add_trace(go.Scatter(x=daredevil_range_in_seconds, y=average_volume_1s, name="Averaged Volume"))
+forest_figure.add_trace(go.Scattergl(x=range_in_seconds, y=detox_predictions, name="Detoxify Toxicity"))
+forest_figure.add_trace(go.Scattergl(x=daredevil_range_in_seconds, y=average_volume_1s, name="Smoothed Video Volume"))
 
 forest_figure.update_xaxes(title="Time (Seconds)")
-forest_figure.update_yaxes(title="Toxicity")
+forest_figure.update_yaxes(title="Toxicity/Volume")
 
 @app.callback(
     Output('time_series', 'figure'),
@@ -598,14 +629,48 @@ initial_feature_selection = corr_matrix.columns[:10]
     Input("eda_feats", "n_clicks")
 )'''
 
+correlation_report_children = []
+model1_corelations = {}
+metrics = [(forest_predictions, "Forest Model Predictions"), (detox_predictions, "Detoxify"), (vader_predictions, "VADER")]
+for i in range(len(metrics)):
+    m1 = metrics[i]
+    for j in range(i+1, len(metrics)):
+        m2 = metrics[j]
+        cor = np.corrcoef(m1[0], m2[0])[0,1]
+        model1_corelations[(m1[1], m2[1])] = cor
+        
+        correlation_report_children.append(
+            html.Li(children=[
+                "The correlation between ",
+                html.B(children=m1[1]),
+                " and ",
+                html.B(children=m2[1]),
+                " is {:2f}".format(float(cor))
+            ])
+        )
+
+correlation_report = html.Ul(children=correlation_report_children)
+
 app.layout = html.Div(children=[
     html.P(id="hidden-div", style={"display": "none"}, title="none"),
     html.Center(children=[html.H1(children='MINTS Biometric Analysis')]),
+    html.P(className="description", children=
+           "Loaded " + repr(FILE_PATH) + ". "
+           "This dashboard displays data taken from the Electroencephalogram (EEG) file specified. It performs basic "
+           "visual and exploratory analysis on the data, and it displays the results of recent machine learning models "
+           "that learned from it."
+    ),
     html.Div(children=[
         html.Div(children=[
             html.Center(children=[
                 html.H2(children="Dataset Visualization"),
                 ]),
+            html.P(className="description", children=
+                   "Data visualization is necessary to get a feel with the data we're workign with. In the Time Series "
+                   "Data section, we plot the raw values of the EEG waveform vs. time; in the EEG Heatmap section, we "
+                   "can see the relative values of the waveforms arranged corresponding to the physical position of the "
+                   "sensors on the human subject."
+            ),
             html.Div(children=[
                 html.Div(children=[
                     dcc.Graph(id='time_series', figure=display_time_series(initial_feature_selection)),
@@ -623,6 +688,11 @@ app.layout = html.Div(children=[
             ], style={'width': '100%'}),
             html.Div(children=[
                 html.Center(children=[html.H2(children="Videos")]),
+                html.P(className="description", children=
+                    "These synchronized videos show the two perspectives relevant to the project: the eyestream, which "
+                    "captures the subject's eyes from multiple angles, and the main video, which captures their "
+                    "primary view."
+                ),
                 html.Div(children=[
                     html.Div(children=[
                         html.Center(children=[html.H3(children="Eyestream")]),
@@ -638,6 +708,14 @@ app.layout = html.Div(children=[
     ], style={}),
     html.Div(children=[
         html.Center(children=[html.H2(children='Exploratory Data Analysis')]),
+        html.P(className="description", children=
+            ["In exploratory data analysis, we run the data through several common algorithms meant to extract "
+             "information from their distributions. Here, we use the ",
+             html.A(href="https://en.wikipedia.org/wiki/Pearson_correlation_coefficient", children="Pearson Correlation Coefficient"),
+             " in a heatmap (showing the correlation between every pair of inputs) and ",
+             html.A(href="https://en.wikipedia.org/wiki/Principal_component_analysis",children="Principal Component Analysis"),
+             ", which helped to inform our decision as to how to represent the data we feed into the models."]
+        ),
         html.Div(children=[
             html.Div(children=[
                 html.Div(children=[
@@ -662,93 +740,31 @@ app.layout = html.Div(children=[
         html.Center(children=[html.H2(children='Models')]),
         html.Div(children=[
             html.H2(children="Sentiment Analysis", style={"margin": "5px"}),
-            dcc.Graph(id='video_sentiment', figure=forest_figure, config={"editable": False, "staticPlot": True})
+            html.P(className="description", children=
+                ["Here, we analyze the results of our first model, a random forest graph intended to detect the toxicity "
+                 "of the video's dialogue solely based on the EEG readings. You can find this model's training code ",
+                 html.A(href="https://colab.research.google.com/drive/1BQVIDoun1ZvuyVa916Qr_CayRXto6_9Y", children="here"),
+                 "."]
+            ),
+            dcc.Graph(id='video_sentiment', figure=forest_figure, config={"editable": False, "staticPlot": True}),
+            html.P(
+                className="description",
+                children=[
+                    "Correlation report:",
+                    correlation_report
+                ]
+            )
         ], style={"border": "1px solid gray", "margin": "5px"}),
         html.Div(children=[
             html.H2(children="EEG-Assisted Speech Recognition", style={"margin": "5px"}),
+            html.P(className="description", children=
+                ["Todo todo todo todo ",
+                 html.A(href="https://colab.research.google.com/drive/1BQVIDoun1ZvuyVa916Qr_CayRXto6_9Y", children="here"),
+                 "."]
+            ),
             html.H4(children="(Model architecture and results here)")
         ], style={"border": "1px solid gray", "margin": "5px"})
     ], style={"border": "1px solid black", "margin": "5px"})
 ])
 
 app.run_server()
-
-exit()
-
-# Usaid: Exploratory Data Analysis Stuff I'm trying out
-import sys
-#!{sys.executable} -m pip install -U pandas-profiling[notebook]
-#!jupyter nbextension enable --py widgetsnbextension
-
-from pandas_profiling import ProfileReport
-profile = ProfileReport(df_eeg_data, minimal=True)
-profile.to_file('eda.html')
-
-df_eeg_data.to_csv('eeg_data.csv')
-
-"""# MFCCs, extracting features from audio
-The current state-of-the-art feature extraction used for speech and speaker recognition is Mel-Frequency Cepstral Coefficients (MFCCs). These were first conceptualized and used in the 80s, and more people continue to find applications where the MFCCs have been helpful and perform quite well. This paper from Sato and Obuchi https://www.jstage.jst.go.jp/article/imt/2/3/2_3_835/_pdf (2007) uses a very simple implementation of MFCCs to get 66.4% accuracy in distinguishing between the emotions (hot anger, neutral, sadness, and happiness). When just looking at the emotions (hot anger, and neutral) the simple algorithm gets 98.75% accuracy. Both of these improve on previous attempts that used Prosodic feataures (pitch, loudness, tempo, rhythm). This shows that MFCCs are a good feature for us to extract if we are looking to gather some emotive responses from the audio to pair with the biometric information. 
-
-\\
-While this might be more than enough to go off of, if we are looking to take it a step further, the paper "Recognition of Human Speech Emotion Using Variants of Mel-Frequency Cepstral Coefficients" published in 2018 can help provide some direction for which variations to use. 
-https://www.researchgate.net/profile/Lenin-Nc/publication/321755687_Linear_Synchronous_Reluctance_Motor-A_Comprehensive_Review/links/5b18bdd90f7e9b68b424b63e/Linear-Synchronous-Reluctance-Motor-A-Comprehensive-Review.pdf#page=490
-## Visualizing Mel Spectrograms
-"""
-
-import librosa
-import librosa.display
-
-# Load the yt_wav file into a signal matrix
-
-signal, audio_sample_rate = librosa.load(yt_wav)
-
-# get the Mel filter banks. key to getting the spectrogram 
-# extract vanilla spectrogram, apply mel filter banks, get the mel spectrogram
-# answers the question what is the weight that should be applied to each frequency? i.e. where are the important mel bands
-
-filter_banks = librosa.filters.mel(n_fft=4096, sr=audio_sample_rate, n_mels=15)
-plt.figure(figsize=(25, 10))
-librosa.display.specshow(filter_banks, sr=audio_sample_rate, x_axis="linear")
-plt.colorbar()
-plt.show()
-
-# the higher weights indicate where the center of the mel bands are, you can see the 15 mel bands as blocks, and the intensity shows how high the mel peak is
-
-mel_spectrogram = librosa.feature.melspectrogram(signal, sr=audio_sample_rate, n_fft=4096, hop_length=512, n_mels=15)
-log_mel_spectrogram = librosa.power_to_db(mel_spectrogram)
-
-plt.figure(figsize=(25, 10))
-librosa.display.specshow(log_mel_spectrogram, x_axis="time", y_axis="mel", sr=audio_sample_rate)
-plt.colorbar()
-plt.show()
-
-"""# Extracting MFCCs from the yt_wav"""
-
-# extract the 15 highest MFCCs (arbitrary 15)
-
-mfccs = librosa.feature.mfcc(signal, n_mfcc=15, sr=audio_sample_rate)
-mfccs.shape
-
-# visualize the MFCCs, spectrum of a spectrum
-plt.figure(figsize=(25, 10))
-librosa.display.specshow(mfccs, x_axis="time", sr=audio_sample_rate)
-plt.colorbar()
-plt.show()
-
-# calculate delta and delta2 MFCCs (first and second derivatives)
-delta_mfccs = librosa.feature.delta(mfccs)
-delta2_mfccs = librosa.feature.delta(mfccs, order=2)
-
-# visualize the derivatives of the MFCCs
-plt.figure(figsize=(25, 10))
-librosa.display.specshow(delta_mfccs, x_axis="time", sr=audio_sample_rate)
-plt.colorbar()
-plt.show()
-
-plt.figure(figsize=(25, 10))
-librosa.display.specshow(delta2_mfccs, x_axis="time", sr=audio_sample_rate)
-plt.colorbar()
-plt.show()
-
-combined_mfccs = np.concatenate((mfccs, delta_mfccs, delta2_mfccs))
-combined_mfccs.shape
