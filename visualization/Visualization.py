@@ -9,6 +9,7 @@ import json
 
 # Prepare environment
 import os
+import random
 import subprocess
 import re
 
@@ -120,6 +121,12 @@ forest_predictions_pickle = os.path.join(nlp_data, "forest_regressor.pickle")
 if not os.path.exists(forest_predictions_pickle):
     print("Downloading", forest_predictions_pickle)
     urlretrieve("https://personal.utdallas.edu/~rdc180001/new_regressor.pickle", forest_predictions_pickle)
+
+for file in ("loss_report.txt", "transcription_model.csv"):
+    path = os.path.join(nlp_data, file)
+    if not os.path.exists(path):
+        print("Downloading", path)
+        urlretrieve("https://personal.utdallas.edu/~atm170000/" + file, path)
 
 user_agent = "MINTSRequester/1.0" #"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.83 Safari/537.36"
 bio = BytesIO(urlopen(Request("https://cdn.discordapp.com/attachments/911339282537529419/956940719648563250/EEG_10-10_system.png", headers={"User-Agent": user_agent})).read())
@@ -651,6 +658,34 @@ for i in range(len(metrics)):
 
 correlation_report = html.Ul(children=correlation_report_children)
 
+loss_regex = re.compile(r"^Iteration (-?\d+) with Loss: (-?\d+(?:\.\d+)?) and average loss: (-?\d+(?:\.\d+)?)$", flags=re.MULTILINE)
+
+model2_loss_iterations = []
+model2_loss_data = []
+model2_average_loss_data = []
+for iter_s, loss_s, avg_loss_s in loss_regex.findall(open(os.path.join(nlp_data, "loss_report.txt")).read()):
+    iteration = int(iter_s)
+    model2_loss_iterations.append(iteration)
+    loss = float(loss_s)
+    model2_loss_data.append(loss)
+    avg_loss = float(avg_loss_s)
+    model2_average_loss_data.append(avg_loss)
+
+model2_figure = go.Figure(layout={"title": "Wav2Vec2 with EEG Data"})
+model2_figure.add_trace(go.Scattergl(x=model2_loss_iterations, y=model2_loss_data, name="Instant Loss"))
+model2_figure.add_trace(go.Scattergl(x=model2_loss_iterations, y=model2_average_loss_data, name="Average Loss"))
+
+model2_figure.update_xaxes(title="Iteration")
+model2_figure.update_yaxes(title="Loss Function")
+
+bad_df = pd.read_csv(os.path.join(nlp_data, "transcription_model.csv"))
+row_idx = random.randint(0, len(bad_df))
+example_batch = bad_df.iloc[row_idx]
+
+example_our_text, example_wav2vec_text = example_batch["model"], example_batch["wav2vec"]
+example_our_text = " ".join(word for word in example_our_text.split("|") if len(word.strip()) > 0)
+example_wav2vec_text = " ".join(word for word in example_wav2vec_text.split("|") if len(word.strip()) > 0)
+
 app.layout = html.Div(children=[
     html.P(id="hidden-div", style={"display": "none"}, title="none"),
     html.Center(children=[html.H1(children='MINTS Biometric Analysis')]),
@@ -674,8 +709,10 @@ app.layout = html.Div(children=[
             html.Div(children=[
                 html.Div(children=[
                     dcc.Graph(id='time_series', figure=display_time_series(initial_feature_selection)),
-                    html.Button("Show All Features (may cause lag)", id="show_all_button1", n_clicks=0),
-                    dcc.Dropdown(id='viz_feats', options=corr_matrix.columns, value=initial_feature_selection, multi=True),
+                    html.Div(children=[
+                        html.Button("Show All Features (may cause lag)", id="show_all_button1", n_clicks=0),
+                        dcc.Dropdown(id='viz_feats', options=corr_matrix.columns, value=initial_feature_selection, multi=True),
+                    ], style={"margin": "5px"})
                 ], style={'display': 'inline-block', 'width': '49%',
                           'height': '100%', 'border-right': '', 'padding': '0', 'margin': '0', 'margin-bottom': '5px'}),
                 html.Div(children=[
@@ -750,6 +787,15 @@ app.layout = html.Div(children=[
             html.P(
                 className="description",
                 children=[
+                    "We found that, both in practice and in our evaluations, the decision tree model was a reliably "
+                    "accurate predictor of rough toxicity from the EEG data alone. The tree model was trained using "
+                    "data from ",
+                    html.A(href="https://github.com/unitaryai/detoxify", children="detoxify"),
+                    ", but we also compared it to the ",
+                    html.A(href="https://github.com/cjhutto/vaderSentiment", children="VADER"),
+                    " sentiment analysis tool for external validity.",
+                    html.Br(),
+                    html.Br(),
                     "Correlation report:",
                     correlation_report
                 ]
@@ -758,11 +804,26 @@ app.layout = html.Div(children=[
         html.Div(children=[
             html.H2(children="EEG-Assisted Speech Recognition", style={"margin": "5px"}),
             html.P(className="description", children=
-                ["Todo todo todo todo ",
-                 html.A(href="https://colab.research.google.com/drive/1BQVIDoun1ZvuyVa916Qr_CayRXto6_9Y", children="here"),
-                 "."]
+                ["Our transcription model is based on ",
+                 html.A(href="https://huggingface.co/docs/transformers/model_doc/wav2vec2", children="wav2vec2"),
+                 ". On top of the wave information, we feed in EEG data at the timeframe by resampling it so that the "
+                 "waveform frequences match."]
             ),
-            html.H4(children="(Model architecture and results here)")
+            html.H3(children="Model Loss", style={"margin": "5px"}),
+            dcc.Graph(id='model2_loss', figure=model2_figure),
+            html.P(className="description", children=[
+                "We found that wav2vec2 does not perform well when given resampled alternate data. It is optimized "
+                "solely for audio waveforms. Training our alternate model ended up decreasing the accuracy "
+                "significantly.",
+                html.Br(),
+                "Example output:",
+                html.Ul(
+                    children=[
+                        html.Li(children=["Our model: ", html.Span(children=example_our_text, style={"font-family": "monospace"})]),
+                        html.Li(children=["Original model: ", html.Span(children=example_wav2vec_text, style={"font-family": "monospace"})])
+                    ]
+                )
+            ])
         ], style={"border": "1px solid gray", "margin": "5px"})
     ], style={"border": "1px solid black", "margin": "5px"})
 ])
