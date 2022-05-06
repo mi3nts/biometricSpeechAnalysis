@@ -10,7 +10,9 @@ Install the python packages required with
 `pip install -r requirements.txt` 
 
 Also get the spacy data
+
 `python -m spacy download en_core_web_sm`
+
 Extract the MINTS.zip archive of the data such that the directory structure contains a file in the current working directory called
 `nlp_data/2022_01_14_T04_U002_EEG01/2022_01_14_T04_U002_EEG01.vhdr`
 
@@ -26,6 +28,7 @@ Some graphs will be shown, they're included in the images subdirectory
 
 What the model learned as the importance of each feature, along with a short description:
 
+```
 ********** Importances of each feature **********
 ('FT8', 0.11398160601212044) in the Brocas Area (ba47R) on the Brocas Area which is Responsible for speech production
 ('P5', 0.10907992368326518) in the Somatic Sensory Association Area (ba39L) on the Wernickes Area which is Involved in understanding speech
@@ -101,6 +104,7 @@ What the model learned as the importance of each feature, along with a short des
 ('ExG 4', 9.736376515872627e-21)
 ('ExG 3', 4.8450580632276565e-21)
 ('ExG 1', -2.8557786538928662e-21)
+```
 
 
 ## Link to Online Environment
