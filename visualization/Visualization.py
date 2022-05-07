@@ -17,7 +17,7 @@ import re
 import scipy.interpolate
 
 '''
-  !pip install spacy dash jupyter-dash pandas==1.2.0 mne[data] gdown yt-dlp webvtt-py librosa > /dev/null
+  !pip install pandas scipy spacy dash jupyter-dash pandas==1.2.0 mne[data] gdown yt-dlp webvtt-py librosa Pillow matplotlib nltk > /dev/null
   !python -m spacy download en_core_web_sm
   !apt install p7zip -y > /dev/null
   !echo installed >> _installed
@@ -57,11 +57,6 @@ from nltk import word_tokenize, pos_tag
 
 # Progress bars
 from tqdm import tqdm
-
-# Matplotlib (alternative to dash for simple debugging graphs)
-import matplotlib.pyplot as plt
-# Do not enable interactive mode
-#plt.ion()
 
 from urllib.request import urlopen, Request, urlretrieve
 from io import BytesIO
