@@ -17,7 +17,7 @@ import re
 import scipy.interpolate
 
 '''
-  !pip install pandas scipy spacy dash jupyter-dash pandas==1.2.0 mne[data] gdown yt-dlp webvtt-py librosa Pillow matplotlib nltk > /dev/null
+  !pip install tqdm pandas scipy dash jupyter-dash pandas==1.2.0 mne[data] yt-dlp webvtt-py librosa Pillow matplotlib nltk detoxify > /dev/null
   !python -m spacy download en_core_web_sm
   !apt install p7zip -y > /dev/null
   !echo installed >> _installed
@@ -66,7 +66,7 @@ from PIL import Image
 import dash
 
 try:
-    # Test if we're in a a Colab environment
+    # Test if we're in a Colab environment
     import google.colab 
     from jupyter_dash import JupyterDash
     class Dash(JupyterDash):
@@ -81,29 +81,34 @@ def get_toxicity_of_text(text):
   results = Detoxify('original').predict(text)
   return results["toxicity"] * 100.0
 
-to_open = "MINTS.zip" # Replace with LargeMINTS.zip for the large dataset
-nlp_data = "large_nlp_data" if "Large" in to_open else "nlp_data"
+nlp_data = "nlp_data"
 
+# NOTE: This file path is hardcoded, but you could change it to any valid
+#       experiment vhdr file, and it *should* work, just so long as the
+#       directory structure is the same.
 FILE_PATH = "./2022_01_14_T04_U002_EEG01/2022_01_14_T04_U002_EEG01.vhdr"
 
 if not os.path.exists(os.path.join(nlp_data, FILE_PATH)):
-    print("No", nlp_data, "directory found! Try using a password to extract the zipfile that's hopefully in ../data")
+    print("No", nlp_data, "directory found! Try using a password to extract the zipfile that's hopefully been provided")
     print("...or you could just unzip the MINTS.zip file into a directory called", nlp_data, "in the CWD")
     
     ap = argparse.ArgumentParser(description="Visualize EEG data")
-    
+
+    ap.add_argument("zip_url", help="The URL of the MINTS zipfile download")
     ap.add_argument("zip_password", help="The password for the MINTS zip (not included for security reasons)")
     
     args = ap.parse_args()
     
     zip_password = args.zip_password
+    zip_url = args.zip_url
 
-    root_dir = os.path.split(os.path.abspath("."))[0]
-    zip_path = os.path.join(root_dir, "data", to_open)
+    urlretrieve(zip_url, "_temp.zip")
+
     os.makedirs(nlp_data, exist_ok=True)
 
     print("Attempting to call 7zip")
-    subprocess.check_call(["7z", "-y", "x", "-p" + zip_password, zip_path], cwd=os.path.abspath(nlp_data))
+    subprocess.check_call(["7z", "-y", "x", "-p" + zip_password, os.path.abspath("MINTS.zip")], cwd=os.path.abspath(nlp_data))
+    os.remove("_temp.zip")
 
 forest_predictions_path = os.path.join(nlp_data, "forest_toxicity_predictions.csv")
 if not os.path.exists(forest_predictions_path):
@@ -123,6 +128,7 @@ for file in ("loss_report.txt", "transcription_model.csv"):
         print("Downloading", path)
         urlretrieve("https://personal.utdallas.edu/~atm170000/" + file, path)
 
+# EEG background
 user_agent = "MINTSRequester/1.0" #"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.83 Safari/537.36"
 bio = BytesIO(urlopen(Request("https://cdn.discordapp.com/attachments/911339282537529419/956940719648563250/EEG_10-10_system.png", headers={"User-Agent": user_agent})).read())
 
@@ -598,6 +604,11 @@ def proc(n_clicks):
 pca_fig = px.scatter(pc_df, x='PC0', y='PC1', title='Principle Component Analysis Scatterplot')
 
 yt_script = open("yt_script.js", "r", encoding="utf-8").read()
+
+# NOTE: TO ANYONE CHANGING THIS IN THE FUTURE, you'll want to change these hardcoded video IDs
+#       into comperable YouTube video IDs for whichever experiment you select. Since we use
+#       YouTube to display the videos without causing any additional lag on the dash backend,
+#       we unfortunately cannot automate this process further.
 
 videoValues = {
     'eyestream_video': {
