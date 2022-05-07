@@ -107,7 +107,7 @@ if not os.path.exists(os.path.join(nlp_data, FILE_PATH)):
     os.makedirs(nlp_data, exist_ok=True)
 
     print("Attempting to call 7zip")
-    subprocess.check_call(["7z", "-y", "x", "-p" + zip_password, os.path.abspath("MINTS.zip")], cwd=os.path.abspath(nlp_data))
+    subprocess.check_call(["7z", "-y", "x", "-p" + zip_password, os.path.abspath("_temp.zip")], cwd=os.path.abspath(nlp_data))
     os.remove("_temp.zip")
 
 forest_predictions_path = os.path.join(nlp_data, "forest_toxicity_predictions.csv")
